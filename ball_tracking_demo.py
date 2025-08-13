@@ -87,8 +87,6 @@ def main():
             ball_tracker.update(detections, frame_count)
             result_frame = annotator.annotate(frame, ball_tracker, frame_count)
 
-            result_frame = cv2.resize(result_frame, (width//2, height//2))
-
             # Add frame information
             info_text = f"Frame: {frame_count}/{total_frames}"
             cv2.putText(result_frame, info_text, (10, height - 30), 
