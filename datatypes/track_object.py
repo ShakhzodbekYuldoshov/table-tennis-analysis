@@ -1,14 +1,19 @@
 import cv2
+import time
+import math
 import numpy as np
 import logging
 from collections import deque
 from typing import List, Tuple, Optional
-import math
-import time
+
+from datatypes.events import BallOutOfBoundsEvent, \
+                             EventManager, \
+                             TableSide, \
+                             BallTableContactEvent, \
+                             BallNetContactEvent
 
 logging.basicConfig(level=logging.INFO, filename='track_object.log',)
 logger = logging.getLogger(__name__)
-
 
 
 class TrackObject:
@@ -81,39 +86,22 @@ class TrackObject:
             return 0.0
         return sum(self.movement_distances) / len(self.movement_distances)
     
-    def get_movement_variance(self) -> float:
-        """Calculate variance in movement to detect consistent motion patterns"""
-        if len(self.movement_distances) < 2:
-            return 0.0
+    def is_direction_changed(self) -> bool:
+        """Check if direction changed based on last 3 centers"""
+        if len(self.centers_history) < 3:
+            return False
         
-        avg_movement = self.get_average_movement()
-        variance = sum((d - avg_movement)**2 for d in self.movement_distances)
-        return variance / len(self.movement_distances)
-    
-    def get_tracking_quality_score(self) -> float:
-        """Calculate quality score based on movement patterns (higher = more likely to be ball)"""
-        if len(self.movement_distances) < 3:
-            return 0.0
+        last = self.centers_history[-1]
+        second_last = self.centers_history[-2]
+        third_last = self.centers_history[-3]
         
-        # Ball characteristics:
-        # 1. Consistent significant movement (not too low, not too erratic)
-        # 2. Reasonable movement variance (smooth trajectory)
-        # 3. Sufficient tracking history
-        
-        avg_movement = self.get_average_movement()
-        movement_variance = self.get_movement_variance()
-        tracking_frames = len(self.movement_distances)
-        
-        # Score components
-        movement_score = min(avg_movement / 50.0, 1.0) if avg_movement > 5 else 0  # Prefer moderate movement
-        consistency_score = 1.0 / (1.0 + movement_variance / 100.0)  # Lower variance = higher score
-        history_score = min(tracking_frames / 10.0, 1.0)  # Prefer longer tracking history
-        
-        return (movement_score * 0.4 + consistency_score * 0.4 + history_score * 0.2)
+        # Check if x direction changed
+        return (last[0] < second_last[0] and third_last[0] > second_last[0]) or \
+               (last[0] > second_last[0] and third_last[0] < second_last[0])
 
 
 class BallTracker:
-    def __init__(self, max_distance_threshold: float = 400.0, min_tracking_frames: int = 10):
+    def __init__(self, max_distance_threshold: float = 400.0, min_tracking_frames: int = 10, event_manager: Optional[EventManager] = None):
         self.tracked_objects = []  # List of TrackObject instances
         self.next_object_id = 0
         self.max_distance_threshold = max_distance_threshold
@@ -121,6 +109,7 @@ class BallTracker:
         self.current_frame = 0
         self.ball_candidate = None  # The most likely ball object
         self.bouncing_points = deque(maxlen=3)  # Store bouncing points for ball trajectory
+        self.event_manager = event_manager
         
         # FPS tracking
         self.frame_times = []
@@ -281,7 +270,7 @@ class BallTracker:
             
             self.last_fps_update = current_frame_time
         
-    def draw_tracking_info(self, image):
+    def draw_tracking_info(self, image, table_left_polygon, table_right_polygon, frame_number: int):
         """Draw tracking information on image"""
         # Draw FPS on top-left corner
         fps_text = f"FPS: {self.current_fps:.1f}"
@@ -291,7 +280,6 @@ class BallTracker:
         for obj in self.tracked_objects:
             if not obj.is_active:
                 continue
-            print("Drawing tracking info on image")
             
             # Different visualization for ball candidate vs other objects
             is_ball = (self.ball_candidate and obj.object_id == self.ball_candidate.object_id)
@@ -312,22 +300,36 @@ class BallTracker:
                     cv2.polylines(image, [points], False, (0, 0, 255), 2)  # Red trail
                 
                 # check whether it is going up or down
-                if len(obj.centers_history) > 1:
+                if len(obj.centers_history) > 2:
                     last_center = obj.centers_history[-1]
                     second_last_center = obj.centers_history[-2]
-                    third_last_center = obj.centers_history[-3] if len(obj.centers_history) > 2 else second_last_center
+                    third_last_center = obj.centers_history[-3]
 
                     if last_center[1] < second_last_center[1]:
                         direction_text = "UP"
 
                         # check whether its direction changed or not by x values
-                        is_direction_changed = last_center[0] < second_last_center[0] and third_last_center[0] > second_last_center[0] or last_center[0] > second_last_center[0] and third_last_center[0] < second_last_center[0]
+                        is_direction_changed = obj.is_direction_changed()
                         is_bouncing = third_last_center[1] < second_last_center[1] and is_direction_changed
 
                         if is_bouncing:
                             direction_text = "BOUNCE"
                             print(f"Height: {obj.height}, Center: {obj.current_center}")
-                            self.bouncing_points.append((second_last_center[0], second_last_center[1] + int(obj.height / 2)))
+                            object_bottom = second_last_center[0], second_last_center[1] + int(obj.height / 2)
+                            on_left_table = self.point_within_polygon(object_bottom, table_left_polygon)
+                            on_right_table = self.point_within_polygon(object_bottom, table_right_polygon)
+                            if on_left_table or on_right_table:
+                                direction_text = "BOUNCE"
+                                self.bouncing_points.append((object_bottom))
+                                self.event_manager.add_event(
+                                    BallTableContactEvent(
+                                        timestamp=frame_number-1,
+                                        frame_number=frame_number-1,
+                                        contact_position=object_bottom,
+                                        table_side=TableSide.RIGHT if on_right_table else TableSide.LEFT,
+                                        bounce_height=2
+                                    )
+                                )
                     else:
                         direction_text = "DOWN"
                     cv2.putText(image, direction_text, (center[0] + 15, center[1] + 20),
@@ -357,5 +359,41 @@ class BallTracker:
         if self.bouncing_points:
             for point in self.bouncing_points:
                 cv2.circle(image, (int(point[0]), int(point[1])), 5, (255, 0, 0), -1)
+
+        # Draw texts for events
+        start_y = 50
+        for i, event in enumerate(self.event_manager.get_events()):
+            if isinstance(event, BallTableContactEvent):
+                cv2.putText(image, f"Bounce: {event.table_side.name}", 
+                            (10, start_y + i * 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+            elif isinstance(event, BallNetContactEvent):
+                cv2.putText(image, "Net Contact", 
+                            (10, start_y + i * 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            elif isinstance(event, BallOutOfBoundsEvent):
+                cv2.putText(image, "Out of Bounds", 
+                            (10, start_y + i * 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
         
         return image
+    
+    def point_within_polygon(self, point: Tuple[float, float], polygon: List[Tuple[float, float]]) -> bool:
+        """Check if a point is within a polygon using ray-casting algorithm"""
+        x, y = point
+        n = len(polygon)
+        inside = False
+        
+        p1x, p1y = polygon[0]
+        for i in range(n + 1):
+            p2x, p2y = polygon[i % n]
+            if y > min(p1y, p2y):
+                if y <= max(p1y, p2y):
+                    if x <= max(p1x, p2x):
+                        if p1y != p2y:
+                            xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+                        if p1x == p2x or x <= xinters:
+                            inside = not inside
+            p1x, p1y = p2x, p2y
+        
+        return inside

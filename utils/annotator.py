@@ -5,7 +5,7 @@ class Annotator:
     def __init__(self, table_points):
         self.table_points = table_points
 
-    def annotate(self, image, ball_tracker: BallTracker):
+    def annotate(self, image, ball_tracker: BallTracker, frame_number: int):
         new_image = image.copy()
         top_left = self.table_points['top_left']
         top_right = self.table_points['top_right']
@@ -18,6 +18,28 @@ class Annotator:
         cv2.line(new_image, bottom_right, bottom_left, (0, 255, 0), 2)
         cv2.line(new_image, bottom_left, top_left, (0, 255, 0), 2)
 
-        new_image = ball_tracker.draw_tracking_info(new_image)
+        # Left side points
+        left_topLeft = self.table_points['left_side_points']['top_left']
+        left_bottomLeft = self.table_points['left_side_points']['bottom_left']
+        left_topRight = self.table_points['left_side_points']['top_right']
+        left_bottomRight = self.table_points['left_side_points']['bottom_right']
+        cv2.line(new_image, left_topLeft, left_bottomLeft, (255, 255, 0), 2)
+        cv2.line(new_image, left_bottomLeft, left_bottomRight, (255, 255, 0), 2)
+        cv2.line(new_image, left_bottomRight, left_topRight, (255, 255, 0), 2)
+        cv2.line(new_image, left_topRight, left_topLeft, (255, 255, 0), 2)
+        left_side_polygon = [left_topLeft, left_bottomLeft, left_bottomRight, left_topRight]
+
+        # Right side points
+        right_topLeft = self.table_points['right_side_points']['top_left']
+        right_bottomLeft = self.table_points['right_side_points']['bottom_left']
+        right_topRight = self.table_points['right_side_points']['top_right']
+        right_bottomRight = self.table_points['right_side_points']['bottom_right']
+        cv2.line(new_image, right_topLeft, right_bottomLeft, (255, 0, 255), 2)
+        cv2.line(new_image, right_bottomLeft, right_bottomRight, (255, 0, 255), 2)
+        cv2.line(new_image, right_bottomRight, right_topRight, (255, 0, 255), 2)
+        cv2.line(new_image, right_topRight, right_topLeft, (255, 0, 255), 2)
+        right_side_polygon = [right_topLeft, right_bottomLeft, right_bottomRight, right_topRight]
+
+        new_image = ball_tracker.draw_tracking_info(new_image, left_side_polygon, right_side_polygon, frame_number=frame_number)
 
         return new_image

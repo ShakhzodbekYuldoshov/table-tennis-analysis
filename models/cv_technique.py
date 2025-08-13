@@ -1,6 +1,5 @@
 import cv2
 from ultralytics import YOLO
-from datatypes.track_object import BallTracker
 
 
 class CVTechniqueBallDetector:
