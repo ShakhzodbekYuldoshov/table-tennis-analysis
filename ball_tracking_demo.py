@@ -50,7 +50,7 @@ def main():
     # Initialize detector with tracking
     detector = CVTechniqueBallDetector()
     ball_tracker = BallTracker(max_distance_threshold=100, min_tracking_frames=30, event_manager=event_manager)
-    annotator = Annotator(config['table_points'])
+    annotator = Annotator(config['table_points'], config['net_area'])
     
     # Open video
     cap = cv2.VideoCapture(args.source)

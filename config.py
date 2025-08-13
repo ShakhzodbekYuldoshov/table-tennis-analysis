@@ -16,5 +16,13 @@ config = {
             "top_right": (751*2, 258*2),
             "bottom_right": (879*2, 433*2)
         }
+    },
+    "net_area": {
+        # Net is in the center between left and right table sides
+        # These coordinates define a rectangular area where the net is located
+        "top_left": (470*2, 200*2),      # Above the table center
+        "top_right": (500*2, 205*2),     # Above the table center
+        "bottom_left": (475*2-30, 440*2),   # Below the table center
+        "bottom_right": (495*2+30, 445*2)   # Below the table center
     }
 }
